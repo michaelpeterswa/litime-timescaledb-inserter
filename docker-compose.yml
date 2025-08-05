@@ -1,40 +1,83 @@
+# yamllint disable rule:line-length
 ---
 services:
   main:
     build: .
+    depends_on:
+      seedtimescaledb:
+        condition: service_completed_successfully
     ports:
       - "8081:8081"
+    volumes:
+      - /var/run/dbus:/var/run/dbus
+    privileged: true
     environment:
-      # logging
-      LOG_LEVEL: "info"
+      TIMESCALE_CONN_STRING: "postgres://postgres:example@timescaledb:5432/postgres?sslmode=disable"
+      LITIME_BATTERY_BLUETOOTH_NAME: "LiTime Battery"
 
-      # metrics
-      METRICS_ENABLED: "true"
-      METRICS_PORT: "8081"
-
-      LOCAL: "true"
-
-      # tracing
-      TRACING_ENABLED: "false"
-      TRACING_SAMPLERATE: "1.0"
-      TRACING_SERVICE: "go-start"
-      TRACING_VERSION: "0.0.1"
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://lgtm:4317"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
 
       # grpc (otlp tracing)
       GRPC_GO_LOG_VERBOSITY_LEVEL: 99
       GRPC_GO_LOG_SEVERITY_LEVEL: info
 
-  lgtm:
-    image: grafana/otel-lgtm
+  prometheus:
+    image: prom/prometheus
     ports:
-      - "3000:3000" # Grafana UI
-      - "4317:4317" # OTLP
-      - "4318:4318" # OTLPHTTP
+      - "9090:9090"
     volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+
+  tempo:
+    image: grafana/tempo:latest
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./docker/tempo/tempo.yml:/etc/tempo.yaml
+      - /tmp/tempo-data:/tmp/tempo
+    ports:
+      - "4317:4317" #  otlp grpc
+      - "4318:4318" #  otlp http
+
+  grafana:
+    image: grafana/grafana
+    volumes:
+      - ./docker/grafana/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml
+      - ./docker/grafana/dashboard.yaml:/etc/grafana/provisioning/dashboards/main.yaml
       - ./docker/grafana/dashboards:/var/lib/grafana/dashboards
-      - ./docker/grafana/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/grafana-dashboards.yaml
     environment:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
       - GF_AUTH_DISABLE_LOGIN_FORM=true
+      - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor
+    ports:
+      - "3000:3000"
+
+  timescaledb:
+    image: timescale/timescaledb-ha:pg16
+    environment:
+      POSTGRES_PASSWORD: example
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      retries: 5
+
+  seedtimescaledb:
+    image: migrate/migrate
+    volumes:
+      - ./docker/timescale/migrations:/migrations
+    entrypoint: >
+      /bin/sh -c 'sleep 5 && migrate -path=/migrations/ -database
+      "postgres://postgres:example@timescaledb:5432/postgres?sslmode=disable" up'
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+
+  pgadmin:
+    image: dpage/pgadmin4
+    ports:
+      - "8082:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: password
+    volumes:
+      - ./docker/pgadmin/servers.json:/pgadmin4/servers.json
