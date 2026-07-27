@@ -9,6 +9,7 @@ readings into TimescaleDB.
 | --- | --- | --- |
 | `LITIME_BATTERIES` | | Batteries to poll, as `id=target` pairs separated by commas. |
 | `LITIME_BATTERY_BLUETOOTH_NAME` | | Single battery by advertised name. Used only when `LITIME_BATTERIES` is unset. |
+| `BLUETOOTH_ADAPTER` | | Adapter to use, e.g. `hci1`. Empty uses the default (`hci0`). Linux only. |
 | `TIMESCALE_CONN_STRING` | *required* | PostgreSQL/TimescaleDB connection string. |
 | `SCRAPE_INTERVAL` | `10s` | How often each battery is asked for a reading. |
 | `SCAN_TIMEOUT` | `30s` | How long to scan when resolving batteries by name. |
@@ -60,6 +61,33 @@ go run ./example/multi
 
 Addresses are MAC addresses on Linux but opaque CoreBluetooth UUIDs on macOS, so
 a value discovered on one operating system will not work on another.
+
+### WiFi and Bluetooth on a Raspberry Pi
+
+The Pi's onboard chip shares a single antenna between WiFi and Bluetooth. A busy
+2.4GHz WiFi link, especially a weak one where the radio transmits at high power
+for long stretches, starves Bluetooth badly enough to break it. The signature is
+distinctive and easy to misread as faulty hardware:
+
+- Scanning works and devices appear with a strong RSSI
+- Connections are *established* and then dropped within about half a second
+- `bluetoothctl` reports `le-connection-abort-by-local`, and `btmon` shows
+  `LE Connection Complete` followed by `Reason: Connection Failed to be
+  Established (0x3e)`
+- It affects every device, not just batteries, and survives reboots
+
+To confirm it, block WiFi briefly and retry the connection:
+
+```sh
+sudo rfkill block wifi && sleep 5
+bluetoothctl connect <address>
+sudo rfkill unblock wifi
+```
+
+If that connects, this is the problem. Fixes, best first: use Ethernet and
+disable WiFi; move Bluetooth to a USB dongle and select it with
+`BLUETOOTH_ADAPTER=hci1` (disable the onboard radio with `dtoverlay=disable-bt`
+so numbering stays stable); or improve the WiFi signal to reduce airtime.
 
 ## How it works
 

@@ -38,6 +38,10 @@ type ManagerOptions struct {
 	// BufferSize bounds the reading queue handed to the consumer.
 	BufferSize int
 
+	// AdapterName selects the Bluetooth adapter, for example "hci1". Empty
+	// means the default adapter. Only meaningful on Linux.
+	AdapterName string
+
 	Logger  *slog.Logger
 	Metrics *Metrics
 }
@@ -53,6 +57,7 @@ type Manager struct {
 	scrapeInterval time.Duration
 	scanTimeout    time.Duration
 	staleTimeout   time.Duration
+	adapter        *tinygobluetooth.Adapter
 	logger         *slog.Logger
 	metrics        *Metrics
 
@@ -94,11 +99,17 @@ func NewManager(opts ManagerOptions) (*Manager, error) {
 		return nil, fmt.Errorf("stale timeout (%s) must exceed scrape interval (%s)", opts.StaleTimeout, opts.ScrapeInterval)
 	}
 
+	adapter, err := resolveAdapter(opts.AdapterName)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Manager{
 		batteries:      opts.Batteries,
 		scrapeInterval: opts.ScrapeInterval,
 		scanTimeout:    opts.ScanTimeout,
 		staleTimeout:   opts.StaleTimeout,
+		adapter:        adapter,
 		logger:         opts.Logger,
 		metrics:        opts.Metrics,
 		readings:       make(chan Reading, opts.BufferSize),
@@ -181,6 +192,7 @@ func (m *Manager) resolveAddresses(ctx context.Context) (map[string]tinygoblueto
 	m.logger.Info("scanning for batteries by name", slog.Any("names", names))
 
 	devices, err := bluetooth.ScanForDevices(ctx,
+		bluetooth.ScanWithAdapter(m.adapter),
 		bluetooth.ScanWithLogger(m.logger),
 		bluetooth.ScanWithTimeout(m.scanTimeout),
 		bluetooth.ScanWithNames(names...),
@@ -302,6 +314,7 @@ func (m *Manager) connect(ctx context.Context, battery Battery, address tinygobl
 
 	client := bluetooth.NewLiTimeBluetoothClient(battery.Value,
 		bluetooth.WithAddress(address),
+		bluetooth.WithAdapter(m.adapter),
 		bluetooth.WithLogger(logger),
 		bluetooth.WithScanTimeout(m.scanTimeout),
 		bluetooth.WithEnableNotificationCallback(func(b []byte) {
