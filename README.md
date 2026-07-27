@@ -65,12 +65,18 @@ a value discovered on one operating system will not work on another.
 
 All batteries share a single Bluetooth radio, which constrains the design:
 
-- **One scan resolves every battery.** An adapter runs only one scan at a time,
-  so scanning per battery would fail outright. Batteries configured by address
-  skip scanning altogether.
-- **Connections are independent.** Each battery is supervised on its own
-  goroutine and retried with exponential backoff, so one flat or out-of-range
-  battery never stalls the others.
+- **Every connection attempt scans first.** BlueZ can only connect to a device it
+  currently holds an object for, and it discards those over time, so a scan is
+  what makes a device connectable — including on reconnect and including when
+  the address is already known. Configuring an address narrows the scan rather
+  than skipping it.
+- **Scanning and connecting are serialised across batteries.** An adapter runs
+  one scan at a time, and a controller establishes one connection at a time.
+  Overlapping attempts abort each other, which shows up as a battery that was
+  working failing when another is added.
+- **Supervision is per battery.** Each is retried on its own goroutine with
+  exponential backoff, so one flat or out-of-range battery never stalls the
+  others.
 - **Silence is the liveness signal.** As a Bluetooth central there is no
   notification when a peer disappears, so a battery that has not produced a
   reading within `STALE_TIMEOUT` is disconnected and reconnected. Keep
