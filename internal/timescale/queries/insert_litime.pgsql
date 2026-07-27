@@ -1,6 +1,7 @@
 INSERT INTO
     sensors.litime (
         time,
+        battery_id,
         total_voltage,
         cell_voltage_sum,
         current,
@@ -40,5 +41,6 @@ VALUES
         $16,
         $17,
         $18,
-        $19
+        $19,
+        $20
     );
