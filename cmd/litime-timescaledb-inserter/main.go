@@ -122,6 +122,7 @@ func main() {
 		ScanTimeout:    c.ScanTimeout,
 		StaleTimeout:   c.StaleTimeout,
 		BufferSize:     c.ReadingBufferSize,
+		AdapterName:    c.BluetoothAdapter,
 		Logger:         slog.Default(),
 		Metrics:        metrics,
 	})
@@ -135,9 +136,15 @@ func main() {
 		managerDone <- manager.Run(ctx)
 	}()
 
+	adapter := c.BluetoothAdapter
+	if adapter == "" {
+		adapter = "default"
+	}
+
 	slog.Info("litime timescaledb inserter started",
 		slog.String("scrape_interval", c.ScrapeInterval.String()),
 		slog.String("stale_timeout", c.StaleTimeout.String()),
+		slog.String("bluetooth_adapter", adapter),
 		slog.Int("batteries", len(batteries)))
 
 	// Writing happens here rather than in the Bluetooth callbacks so that a slow

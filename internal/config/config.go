@@ -23,6 +23,15 @@ type Config struct {
 	// predates LITIME_BATTERIES and is used only when that is unset.
 	LitimeBatteryBluetoothName string `env:"LITIME_BATTERY_BLUETOOTH_NAME"`
 
+	// BluetoothAdapter selects the adapter to use, for example "hci1". Empty
+	// uses the default, which is hci0.
+	//
+	// The Raspberry Pi's onboard chip shares one antenna between WiFi and
+	// Bluetooth, and a busy 2.4GHz WiFi link starves Bluetooth badly enough
+	// that connections are established and then dropped immediately. Moving to
+	// a USB dongle gives Bluetooth its own radio; the dongle comes up as hci1.
+	BluetoothAdapter string `env:"BLUETOOTH_ADAPTER"`
+
 	TimescaleConnString string        `env:"TIMESCALE_CONN_STRING,required"`
 	ScrapeInterval      time.Duration `env:"SCRAPE_INTERVAL" envDefault:"10s"`
 	CallbackTimeout     time.Duration `env:"CALLBACK_TIMEOUT" envDefault:"5s"`
