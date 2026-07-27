@@ -10,6 +10,8 @@ jobs:
   release:
     name: "Release to GitHub"
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -24,5 +26,5 @@ jobs:
 
       - name: Release Version
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_PAT }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: npx semantic-release@22.0.12
