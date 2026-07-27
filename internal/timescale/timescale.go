@@ -48,9 +48,13 @@ func (c *TimescaleClient) Close() {
 //go:embed queries/insert_litime.pgsql
 var insertLitime string
 
-func (c *TimescaleClient) Insert(ctx context.Context, measure *golitimebluetooth.LiTimeBatteryData) error {
+// Insert records one measurement against the battery it came from. Callers pass
+// the observation time explicitly so a reading is stored with the moment the
+// battery reported it rather than the moment it reached the database.
+func (c *TimescaleClient) Insert(ctx context.Context, batteryID string, observedAt time.Time, measure *golitimebluetooth.LiTimeBatteryData) error {
 	_, err := c.Pool.Exec(ctx, insertLitime,
-		time.Now(),
+		observedAt,
+		batteryID,
 		measure.TotalVoltage,
 		measure.CellVoltageSum,
 		measure.Current,

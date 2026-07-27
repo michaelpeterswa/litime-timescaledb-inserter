@@ -9,10 +9,9 @@ import (
 	"syscall"
 	"time"
 
-	golitimebluetooth "alpineworks.io/go-litime-bluetooth"
-	"alpineworks.io/go-litime-bluetooth/bluetooth"
 	"alpineworks.io/ootel"
 	"github.com/michaelpeterswa/litime-timescaledb-inserter/internal/config"
+	"github.com/michaelpeterswa/litime-timescaledb-inserter/internal/litime"
 	"github.com/michaelpeterswa/litime-timescaledb-inserter/internal/logging"
 	"github.com/michaelpeterswa/litime-timescaledb-inserter/internal/timescale"
 	"go.opentelemetry.io/contrib/instrumentation/host"
@@ -39,7 +38,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	ctx := context.Background()
+	// Cancelled on SIGINT/SIGTERM, which unwinds the battery supervisors and
+	// closes the reading queue so the writer below can drain and exit.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	exporterType := ootel.ExporterTypePrometheus
 	if c.Local {
@@ -83,8 +85,23 @@ func main() {
 	}
 
 	defer func() {
-		_ = shutdown(ctx)
+		_ = shutdown(context.Background())
 	}()
+
+	batteries, err := litime.ParseBatteries(c.LitimeBatteries, c.LitimeBatteryBluetoothName)
+	if err != nil {
+		slog.Error("could not determine batteries to poll", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	for _, battery := range batteries {
+		// Log how each battery will be located: a mistyped address falls back to
+		// a name lookup, and this is where that becomes visible.
+		slog.Info("battery configured",
+			slog.String("battery_id", battery.ID),
+			slog.String("match", string(battery.Match)),
+			slog.String("value", battery.Value))
+	}
 
 	timescaleClient, err := timescale.NewTimescaleClient(ctx, c.TimescaleConnString)
 	if err != nil {
@@ -93,62 +110,69 @@ func main() {
 	}
 	defer timescaleClient.Close()
 
-	liTimeClient := bluetooth.NewLiTimeBluetoothClient(c.LitimeBatteryBluetoothName, bluetooth.WithLogger(slog.Default()),
-		bluetooth.WithEnableNotificationCallback(func(b []byte) {
-			callbackCtx, cancel := context.WithTimeout(ctx, c.CallbackTimeout)
-			defer cancel()
-
-			data, err := golitimebluetooth.ParseLiTimeBatteryData(b)
-			if err != nil {
-				slog.Error("failed to parse notification data", slog.String("error", err.Error()))
-				return
-			}
-			slog.Info("received notification data", slog.Any("data", data))
-
-			err = timescaleClient.Insert(callbackCtx, data)
-			if err != nil {
-				slog.Error("failed to insert data into timescale", slog.String("error", err.Error()))
-				return
-			}
-		}),
-	)
-
-	// Connect to the LiTime battery
-	err = liTimeClient.Connect(ctx)
+	metrics, err := litime.NewMetrics()
 	if err != nil {
-		slog.Error("could not connect to litime battery", slog.String("error", err.Error()))
+		slog.Error("could not create metrics", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 
-	// Start periodic data collection goroutine
-	go func() {
-		ticker := time.NewTicker(c.ScrapeInterval)
-		defer ticker.Stop()
+	manager, err := litime.NewManager(litime.ManagerOptions{
+		Batteries:      batteries,
+		ScrapeInterval: c.ScrapeInterval,
+		ScanTimeout:    c.ScanTimeout,
+		StaleTimeout:   c.StaleTimeout,
+		BufferSize:     c.ReadingBufferSize,
+		Logger:         slog.Default(),
+		Metrics:        metrics,
+	})
+	if err != nil {
+		slog.Error("could not create battery manager", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
 
-		for {
-			select {
-			case <-ctx.Done():
-				slog.Info("stopping periodic data collection")
-				return
-			case <-ticker.C:
-				err := liTimeClient.QueryData()
-				if err != nil {
-					slog.Error("failed to query battery data", slog.String("error", err.Error()))
-					continue
-				}
-			}
-		}
+	managerDone := make(chan error, 1)
+	go func() {
+		managerDone <- manager.Run(ctx)
 	}()
 
 	slog.Info("litime timescaledb inserter started",
 		slog.String("scrape_interval", c.ScrapeInterval.String()),
-		slog.String("battery_name", c.LitimeBatteryBluetoothName))
+		slog.String("stale_timeout", c.StaleTimeout.String()),
+		slog.Int("batteries", len(batteries)))
 
-	// Set up signal handling for graceful shutdown
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	// Writing happens here rather than in the Bluetooth callbacks so that a slow
+	// database cannot stall notification dispatch. The loop ends when the
+	// manager closes the queue, after draining whatever is still in it.
+	for reading := range manager.Readings() {
+		insert(ctx, timescaleClient, metrics, c.CallbackTimeout, reading)
+	}
 
-	// Wait for signal
-	sig := <-sigChan
-	slog.Info("received signal, shutting down gracefully", slog.String("signal", sig.String()))
+	if err := <-managerDone; err != nil {
+		slog.Error("battery manager stopped with an error", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	slog.Info("shutdown complete")
+}
+
+// insert writes one reading, using a background context so that readings still
+// in the queue at shutdown are not abandoned mid-write.
+func insert(ctx context.Context, client *timescale.TimescaleClient, metrics *litime.Metrics, timeout time.Duration, reading litime.Reading) {
+	insertCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	defer cancel()
+
+	err := client.Insert(insertCtx, reading.BatteryID, reading.ObservedAt, reading.Data)
+	metrics.RecordInsert(insertCtx, reading.BatteryID, err)
+
+	if err != nil {
+		slog.Error("failed to insert data into timescale",
+			slog.String("battery_id", reading.BatteryID),
+			slog.String("error", err.Error()))
+		return
+	}
+
+	slog.Debug("inserted reading",
+		slog.String("battery_id", reading.BatteryID),
+		slog.Int("soc", int(reading.Data.SOC)),
+		slog.Float64("total_voltage", float64(reading.Data.TotalVoltage)))
 }

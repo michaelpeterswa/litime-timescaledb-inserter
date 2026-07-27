@@ -13,7 +13,12 @@ services:
     privileged: true
     environment:
       TIMESCALE_CONN_STRING: "postgres://postgres:example@timescaledb:5432/postgres?sslmode=disable"
-      LITIME_BATTERY_BLUETOOTH_NAME: "LiTime Battery"
+
+      # Map your own battery IDs to device addresses. The ID is what gets stored
+      # with every reading, so pick something meaningful and stable.
+      # Run `go run ./example/multi` from go-litime-bluetooth to list addresses.
+      # A value that is not an address is treated as an advertised name instead.
+      LITIME_BATTERIES: "garage=11:22:33:AA:BB:CC,shed=11:22:33:AA:BB:CD"
 
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
 
