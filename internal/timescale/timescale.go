@@ -81,6 +81,53 @@ func (c *TimescaleClient) Insert(ctx context.Context, batteryID string, observed
 	return nil
 }
 
+//go:embed queries/insert_victron.pgsql
+var insertVictron string
+
+// VictronMeasurement is one decoded Victron solar charger advertisement.
+//
+// The readings are pointers because Victron encodes "not available" per field.
+// They are stored as NULL rather than zero, since a charger reporting nothing
+// and a charger reporting no output are different states.
+type VictronMeasurement struct {
+	DeviceID   string
+	ObservedAt time.Time
+	ModelID    uint16
+	ModelName  string
+	RecordType uint8
+
+	ChargeState            *string
+	ChargerError           *string
+	BatteryVoltage         *float64
+	BatteryChargingCurrent *float64
+	YieldToday             *float64
+	SolarPower             *float64
+	ExternalDeviceLoad     *float64
+}
+
+// InsertVictron records one Victron reading.
+func (c *TimescaleClient) InsertVictron(ctx context.Context, measure VictronMeasurement) error {
+	_, err := c.Pool.Exec(ctx, insertVictron,
+		measure.ObservedAt,
+		measure.DeviceID,
+		int32(measure.ModelID),
+		measure.ModelName,
+		int16(measure.RecordType),
+		measure.ChargeState,
+		measure.ChargerError,
+		measure.BatteryVoltage,
+		measure.BatteryChargingCurrent,
+		measure.YieldToday,
+		measure.SolarPower,
+		measure.ExternalDeviceLoad,
+	)
+	if err != nil {
+		return fmt.Errorf("insert victron data: %w", err)
+	}
+
+	return nil
+}
+
 func mapCellVoltages(cellVoltages []float32) map[string]float32 {
 	voltages := make(map[string]float32, len(cellVoltages))
 	for i, voltage := range cellVoltages {

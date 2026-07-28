@@ -23,6 +23,30 @@ type Config struct {
 	// predates LITIME_BATTERIES and is used only when that is unset.
 	LitimeBatteryBluetoothName string `env:"LITIME_BATTERY_BLUETOOTH_NAME"`
 
+	// VictronDevices maps an operator-chosen device ID to a Bluetooth device
+	// address, for example:
+	//
+	//	VICTRON_DEVICES="smartsolar=F9:E3:C4:6E:85:D9"
+	//
+	// Leave unset to disable Victron collection entirely.
+	VictronDevices map[string]string `env:"VICTRON_DEVICES" envKeyValSeparator:"="`
+
+	// VictronKeys maps those same device IDs to their advertisement keys, as
+	// shown by VictronConnect under Product Info, Instant Readout Details.
+	//
+	// These are credentials and belong in a secret alongside the database
+	// password. Note that a device's key changes if its Bluetooth PIN is reset.
+	VictronKeys map[string]string `env:"VICTRON_KEYS" envKeyValSeparator:"="`
+
+	// VictronScanInterval is how often Victron devices are scanned for. Each
+	// scan holds the radio, so battery reconnects queue behind it; the default
+	// is deliberately slow relative to the scan duration.
+	VictronScanInterval time.Duration `env:"VICTRON_SCAN_INTERVAL" envDefault:"60s"`
+
+	// VictronScanDuration bounds a single Victron scan. It must be shorter than
+	// the interval, or the radio is never free for anything else.
+	VictronScanDuration time.Duration `env:"VICTRON_SCAN_DURATION" envDefault:"5s"`
+
 	// BluetoothAdapter selects the adapter to use, for example "hci1". Empty
 	// uses the default, which is hci0.
 	//

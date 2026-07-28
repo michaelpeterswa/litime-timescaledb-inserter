@@ -1,0 +1,30 @@
+INSERT INTO
+    sensors.victron (
+        time,
+        device_id,
+        model_id,
+        model_name,
+        record_type,
+        charge_state,
+        charger_error,
+        battery_voltage,
+        battery_charging_current,
+        yield_today,
+        solar_power,
+        external_device_load
+    )
+VALUES
+    (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7,
+        $8,
+        $9,
+        $10,
+        $11,
+        $12
+    );

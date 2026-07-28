@@ -116,6 +116,16 @@ func NewManager(opts ManagerOptions) (*Manager, error) {
 	}, nil
 }
 
+// Adapter returns the Bluetooth adapter this manager uses.
+//
+// Anything else in the process that touches the radio must use this same
+// adapter. The Bluetooth library serialises scanning and connecting per
+// adapter, so a second collector resolving its own would sit outside that lock
+// and abort connections mid-establishment.
+func (m *Manager) Adapter() *tinygobluetooth.Adapter {
+	return m.adapter
+}
+
 // Readings returns the channel every battery publishes to. It is closed once Run
 // has returned and no further readings will arrive.
 func (m *Manager) Readings() <-chan Reading {
