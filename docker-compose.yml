@@ -58,21 +58,30 @@ services:
       - "3000:3000"
 
   timescaledb:
-    image: timescale/timescaledb-ha:pg16
+    # Pinned to the version the live database runs, so a schema that works here
+    # is a schema that works there.
+    image: timescale/timescaledb:2.17.2-pg16
     environment:
       POSTGRES_PASSWORD: example
+      # timescaledb-tune reads the cgroup memory limit at startup and panics
+      # where that is unreadable. Nothing here needs tuning.
+      NO_TS_TUNE: "true"
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres"]
       interval: 5s
       retries: 5
 
+  # The schema is defined in lfprocks/timescale-migrations, which is what
+  # actually migrates the live database. This stack used to carry its own copy
+  # of the sensors.litime and sensors.victron migrations; two files describing
+  # one table is how they end up disagreeing.
   seedtimescaledb:
-    image: migrate/migrate
-    volumes:
-      - ./docker/timescale/migrations:/migrations
-    entrypoint: >
-      /bin/sh -c 'sleep 5 && migrate -path=/migrations/ -database
-      "postgres://postgres:example@timescaledb:5432/postgres?sslmode=disable" up'
+    image: ghcr.io/lfprocks/timescale-migrations:latest
+    environment:
+      DATABASE_HOST: timescaledb
+      DATABASE_USER: postgres
+      DATABASE_PASSWORD: example
+      DATABASE_NAME: postgres
     depends_on:
       timescaledb:
         condition: service_healthy

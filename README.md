@@ -169,9 +169,17 @@ question is usually whether one of them has quietly died:
 
 ## Schema
 
-Readings land in `sensors.litime`, a hypertable keyed on `time` with a
+Battery readings land in `sensors.litime`, a hypertable keyed on `time` with a
 `battery_id` column identifying the source. Rows written before multi-battery
-support are backfilled as `unknown`.
+support are backfilled as `unknown`. Victron readings land in `sensors.victron`,
+keyed on `time` with a `device_id`.
+
+Both are defined in
+[lfprocks/timescale-migrations](https://github.com/lfprocks/timescale-migrations),
+which is the single source of truth for the `sensors` schema and what migrates
+the live database. This repository does **not** carry its own copy — two files
+describing one table is how they end up disagreeing, which is exactly what
+happened.
 
 ## Development
 
@@ -182,3 +190,7 @@ docker compose up --build
 Brings up the inserter alongside TimescaleDB, Grafana, Prometheus, Tempo and
 pgAdmin. The container needs `/var/run/dbus` and `privileged: true` to reach the
 host's Bluetooth adapter.
+
+The schema is applied by the `timescale-migrations` image rather than from this
+repository, so a schema change belongs in that repository and arrives here on
+the next `docker compose pull`.
