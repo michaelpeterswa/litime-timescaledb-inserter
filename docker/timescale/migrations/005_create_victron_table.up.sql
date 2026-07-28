@@ -29,3 +29,16 @@ SELECT
 
 -- Almost every query is "this device, recent first".
 CREATE INDEX IF NOT EXISTS victron_device_id_time_idx ON sensors.victron (device_id, time DESC);
+
+-- The grafana role reads these tables, and a grant per table is easy to forget:
+-- sensors.victron was created without one, so the dashboard queried a table it
+-- could not see. Grant it, and set the default so later tables are covered
+-- without anyone having to remember.
+GRANT
+SELECT
+    ON sensors.victron TO grafana;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA sensors
+GRANT
+SELECT
+    ON TABLES TO grafana;
