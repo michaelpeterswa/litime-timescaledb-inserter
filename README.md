@@ -9,6 +9,10 @@ readings into TimescaleDB.
 | --- | --- | --- |
 | `LITIME_BATTERIES` | | Batteries to poll, as `id=target` pairs separated by commas. |
 | `LITIME_BATTERY_BLUETOOTH_NAME` | | Single battery by advertised name. Used only when `LITIME_BATTERIES` is unset. |
+| `VICTRON_DEVICES` | | Victron devices to read, as `id=address` pairs. Unset disables Victron collection. |
+| `VICTRON_KEYS` | | Advertisement keys for those devices, as `id=key` pairs. **Credentials.** |
+| `VICTRON_SCAN_INTERVAL` | `60s` | How often to scan for Victron advertisements. |
+| `VICTRON_SCAN_DURATION` | `5s` | Length of a single Victron scan. Must be shorter than the interval. |
 | `BLUETOOTH_ADAPTER` | | Adapter to use, e.g. `hci1`. Empty uses the default (`hci0`). Linux only. |
 | `TIMESCALE_CONN_STRING` | *required* | PostgreSQL/TimescaleDB connection string. |
 | `SCRAPE_INTERVAL` | `10s` | How often each battery is asked for a reading. |
@@ -61,6 +65,37 @@ go run ./example/multi
 
 Addresses are MAC addresses on Linux but opaque CoreBluetooth UUIDs on macOS, so
 a value discovered on one operating system will not work on another.
+
+### Victron solar chargers
+
+Victron devices broadcast their state in the BLE advertisement rather than
+exposing it over a connection, so reading them is passive — no connection, no
+pairing, no GATT:
+
+```sh
+VICTRON_DEVICES="smartsolar=F9:E3:C4:6E:85:D9"
+VICTRON_KEYS="smartsolar=<advertisement key>"
+```
+
+The advertisement key comes from VictronConnect: select the device, then
+**Settings → Product Info → Instant Readout Details → Show**. It is a credential
+and belongs in a secret alongside the database password. It **changes if the
+device's Bluetooth PIN is reset**.
+
+Both variables are keyed by the same operator-chosen device ID, and every
+configured device needs an entry in each. A device without a key can be seen but
+never decrypted, and a key naming a device that is not configured is almost
+always a typo, so both are startup errors rather than silent omissions.
+
+Scanning shares the radio with the batteries and is serialised against their
+connections, which is why this runs in the same process rather than beside it.
+Each scan holds the radio, so battery reconnects queue behind it — keep
+`VICTRON_SCAN_DURATION` short relative to `VICTRON_SCAN_INTERVAL`. Readings land
+in `sensors.victron`.
+
+Because there is no connection to lose, the only sign that a Victron device has
+gone quiet is the absence of readings; `victron_missed` counts scans that
+produced nothing for a configured device and is the metric worth alerting on.
 
 ### WiFi and Bluetooth on a Raspberry Pi
 

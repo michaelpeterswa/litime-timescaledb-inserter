@@ -136,6 +136,16 @@ func main() {
 		managerDone <- manager.Run(ctx)
 	}()
 
+	// Victron devices are optional, and share the battery manager's adapter so
+	// that scanning for them is serialised against battery connections. A
+	// separate adapter would sit outside that lock and abort connections
+	// mid-establishment.
+	victronDone, victronDevices, err := startVictron(ctx, c, manager.Adapter(), timescaleClient)
+	if err != nil {
+		slog.Error("could not start victron collector", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
 	adapter := c.BluetoothAdapter
 	if adapter == "" {
 		adapter = "default"
@@ -145,7 +155,8 @@ func main() {
 		slog.String("scrape_interval", c.ScrapeInterval.String()),
 		slog.String("stale_timeout", c.StaleTimeout.String()),
 		slog.String("bluetooth_adapter", adapter),
-		slog.Int("batteries", len(batteries)))
+		slog.Int("batteries", len(batteries)),
+		slog.Int("victron_devices", victronDevices))
 
 	// Writing happens here rather than in the Bluetooth callbacks so that a slow
 	// database cannot stall notification dispatch. The loop ends when the
@@ -156,6 +167,11 @@ func main() {
 
 	if err := <-managerDone; err != nil {
 		slog.Error("battery manager stopped with an error", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	if err := <-victronDone; err != nil {
+		slog.Error("victron collector stopped with an error", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 
