@@ -1,0 +1,32 @@
+INSERT INTO
+    sensors.victron_battery_monitor (
+        time,
+        device_id,
+        model_id,
+        model_name,
+        record_type,
+        battery_voltage,
+        battery_current,
+        state_of_charge,
+        consumed_ah,
+        time_to_go_minutes,
+        alarm_reason,
+        aux_input_type,
+        aux_value
+    )
+VALUES
+    (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7,
+        $8,
+        $9,
+        $10,
+        $11,
+        $12,
+        $13
+    );

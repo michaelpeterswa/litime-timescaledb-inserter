@@ -6,7 +6,7 @@ toolchain go1.24.2
 
 require (
 	alpineworks.io/go-litime-bluetooth v1.2.0
-	alpineworks.io/go-victron-ble v1.0.0
+	alpineworks.io/go-victron-ble v1.1.0
 	alpineworks.io/ootel v1.0.4
 	github.com/caarlos0/env/v11 v11.3.1
 	github.com/exaring/otelpgx v0.9.3

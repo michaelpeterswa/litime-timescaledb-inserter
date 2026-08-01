@@ -14,14 +14,20 @@ import (
 	tinygobluetooth "tinygo.org/x/bluetooth"
 )
 
-// Reading is one decoded solar charger advertisement.
+// Reading is one decoded Victron advertisement.
+//
+// Record types report almost disjoint fields, so the payload is a variant
+// rather than one struct with everything on it: exactly one of the pointers
+// below is set, chosen by RecordType. They go to different tables.
 type Reading struct {
 	DeviceID   string
 	ObservedAt time.Time
 	ModelID    uint16
 	ModelName  string
 	RecordType uint8
-	Data       *victronble.SolarCharger
+
+	SolarCharger   *victronble.SolarCharger
+	BatteryMonitor *victronble.BatteryMonitor
 }
 
 // CollectorOptions configures a Collector.
@@ -193,7 +199,19 @@ func (c *Collector) scanOnce(ctx context.Context) {
 	}
 }
 
-// handle decodes one scan result, reporting whether a reading was published.
+// handle decodes one scan result, reporting whether the device was seen
+// broadcasting instant readout.
+//
+// That return value feeds the missed counter, so it means "this device is
+// advertising readable state", not "a reading was published". A record type
+// this build cannot parse still means the device is alive and transmitting,
+// and counting it as missing would point at the wrong problem entirely.
+//
+// A record that fails to parse as instant readout deliberately does NOT count
+// as seen. That is the shape a device advertises when instant readout is
+// switched off in VictronConnect: a four byte header carrying the model and
+// nothing else. It is indistinguishable from silence as far as data goes, so
+// the missed counter should fire and say so.
 func (c *Collector) handle(ctx context.Context, device Device, found litimebluetooth.DiscoveredDevice) bool {
 	data, ok := found.ManufacturerData[victronble.CompanyID]
 	if !ok {
@@ -210,11 +228,14 @@ func (c *Collector) handle(ctx context.Context, device Device, found litimebluet
 		return false
 	}
 
-	if record.Type != victronble.RecordSolarCharger {
+	switch record.Type {
+	case victronble.RecordSolarCharger, victronble.RecordBatteryMonitor:
+	default:
 		c.logger.Debug("ignoring unsupported victron record type",
 			slog.String("device_id", device.ID),
 			slog.String("record_type", record.Type.String()))
-		return false
+		c.metrics.recordUnsupported(ctx, device.ID, record.Type.String())
+		return true
 	}
 
 	payload, err := victronble.Decrypt(record, device.Key)
@@ -232,16 +253,9 @@ func (c *Collector) handle(ctx context.Context, device Device, found litimebluet
 				slog.String("error", err.Error()))
 		}
 		c.metrics.recordDecryptFailure(ctx, device.ID)
-		return false
-	}
-
-	charger, err := victronble.ParseSolarCharger(payload)
-	if err != nil {
-		c.logger.Warn("failed to parse victron payload",
-			slog.String("device_id", device.ID),
-			slog.String("error", err.Error()))
-		c.metrics.recordDecodeFailure(ctx, device.ID)
-		return false
+		// Still seen: a wrong key is a configuration fault, not a quiet device,
+		// and decryptFailures already says so precisely.
+		return true
 	}
 
 	modelName, _ := victronble.ModelName(record.ModelID)
@@ -252,7 +266,32 @@ func (c *Collector) handle(ctx context.Context, device Device, found litimebluet
 		ModelID:    record.ModelID,
 		ModelName:  modelName,
 		RecordType: uint8(record.Type),
-		Data:       charger,
+	}
+
+	switch record.Type {
+	case victronble.RecordSolarCharger:
+		charger, err := victronble.ParseSolarCharger(payload)
+		if err != nil {
+			c.logger.Warn("failed to parse victron payload",
+				slog.String("device_id", device.ID),
+				slog.String("record_type", record.Type.String()),
+				slog.String("error", err.Error()))
+			c.metrics.recordDecodeFailure(ctx, device.ID)
+			return true
+		}
+		reading.SolarCharger = charger
+
+	case victronble.RecordBatteryMonitor:
+		monitor, err := victronble.ParseBatteryMonitor(payload)
+		if err != nil {
+			c.logger.Warn("failed to parse victron payload",
+				slog.String("device_id", device.ID),
+				slog.String("record_type", record.Type.String()),
+				slog.String("error", err.Error()))
+			c.metrics.recordDecodeFailure(ctx, device.ID)
+			return true
+		}
+		reading.BatteryMonitor = monitor
 	}
 
 	if !c.publish(reading) {

@@ -2,6 +2,8 @@ alpineworks.io/go-litime-bluetooth v1.2.0 h1:K0/273ywHwk2bwJ9LNJ0R/2IugMkfeles2+
 alpineworks.io/go-litime-bluetooth v1.2.0/go.mod h1:hmAPqfWiWDfnHssR8XurZl6kX3RdAAo6iMCnr63YytE=
 alpineworks.io/go-victron-ble v1.0.0 h1:zhay5wb2URttQatrOBI3U6+m3P5UYJcFhHgY4sN+GAI=
 alpineworks.io/go-victron-ble v1.0.0/go.mod h1:3NjpS2G8z3lVaEQ9JVB2VkYjaaNYpgJNOPnAOiOoNrw=
+alpineworks.io/go-victron-ble v1.1.0 h1:aNw4afYVsa55kDgjlbV64VT5HYv2oendkJuf81mr2dQ=
+alpineworks.io/go-victron-ble v1.1.0/go.mod h1:3NjpS2G8z3lVaEQ9JVB2VkYjaaNYpgJNOPnAOiOoNrw=
 alpineworks.io/ootel v1.0.4 h1:NZrYyFsk8obdfhbs0g1+XPXotLdrLO+iJfFRQvfkdfM=
 alpineworks.io/ootel v1.0.4/go.mod h1:ZCKCBy2Q0wVPO03iSSTfbv+GcL/5lU0d+SPH8hTwd3k=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
