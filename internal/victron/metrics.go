@@ -18,6 +18,7 @@ const meterName = "github.com/michaelpeterswa/litime-timescaledb-inserter/victro
 type Metrics struct {
 	readings        metric.Int64Counter
 	missed          metric.Int64Counter
+	unsupported     metric.Int64Counter
 	decryptFailures metric.Int64Counter
 	decodeFailures  metric.Int64Counter
 	scanFailures    metric.Int64Counter
@@ -43,6 +44,7 @@ func NewMetrics() (*Metrics, error) {
 	m := &Metrics{
 		readings:        counter("victron.readings", "Advertisements decoded from a Victron device"),
 		missed:          counter("victron.missed", "Scans that produced no advertisement for a configured device"),
+		unsupported:     counter("victron.unsupported_records", "Advertisements from a record type this build cannot decode"),
 		decryptFailures: counter("victron.decrypt_failures", "Advertisements that could not be decrypted"),
 		decodeFailures:  counter("victron.decode_failures", "Advertisements that decrypted but could not be parsed"),
 		scanFailures:    counter("victron.scan_failures", "Scans that failed outright"),
@@ -76,6 +78,20 @@ func (m *Metrics) recordMissed(ctx context.Context, deviceID string) {
 		return
 	}
 	m.missed.Add(ctx, 1, device(deviceID))
+}
+
+// recordUnsupported reports a device broadcasting a record type this build has
+// no parser for. It is deliberately separate from missed: the device is alive
+// and transmitting, so counting it as absent would send anyone reading the
+// metric looking for a radio problem that does not exist.
+func (m *Metrics) recordUnsupported(ctx context.Context, deviceID, recordType string) {
+	if m == nil {
+		return
+	}
+	m.unsupported.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("device_id", deviceID),
+		attribute.String("record_type", recordType),
+	))
 }
 
 func (m *Metrics) recordDecryptFailure(ctx context.Context, deviceID string) {

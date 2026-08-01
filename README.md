@@ -66,16 +66,33 @@ go run ./example/multi
 Addresses are MAC addresses on Linux but opaque CoreBluetooth UUIDs on macOS, so
 a value discovered on one operating system will not work on another.
 
-### Victron solar chargers
+### Victron devices
 
 Victron devices broadcast their state in the BLE advertisement rather than
 exposing it over a connection, so reading them is passive — no connection, no
-pairing, no GATT:
+pairing, no GATT. The device's Bluetooth PIN is therefore irrelevant here; it
+gates connecting with VictronConnect, which this never does.
 
 ```sh
-VICTRON_DEVICES="smartsolar=F9:E3:C4:6E:85:D9"
-VICTRON_KEYS="smartsolar=<advertisement key>"
+VICTRON_DEVICES="smartsolar=F9:E3:C4:6E:85:D9,shunt=F1:8C:29:05:9D:BA"
+VICTRON_KEYS="smartsolar=<advertisement key>,shunt=<advertisement key>"
 ```
+
+Two record types are decoded, each written to its own table:
+
+| Record | Devices | Table |
+| --- | --- | --- |
+| `0x01` solar charger | SmartSolar, BlueSolar MPPT | `sensors.victron` |
+| `0x02` battery monitor | SmartShunt, BMV-7xx | `sensors.victron_battery_monitor` |
+
+Any other record type is logged at debug and counted by
+`victron_unsupported_records`; it does not count as a missing device.
+
+**Instant Readout must be switched on per device**, under the same settings
+screen as the key below. A device with it disabled still advertises — a four
+byte header carrying its model and nothing else — so it looks present in a scan
+while never producing a reading. That reads as a missing device here, which is
+the intended signal.
 
 The advertisement key comes from VictronConnect: select the device, then
 **Settings → Product Info → Instant Readout Details → Show**. It is a credential
@@ -90,12 +107,23 @@ always a typo, so both are startup errors rather than silent omissions.
 Scanning shares the radio with the batteries and is serialised against their
 connections, which is why this runs in the same process rather than beside it.
 Each scan holds the radio, so battery reconnects queue behind it — keep
-`VICTRON_SCAN_DURATION` short relative to `VICTRON_SCAN_INTERVAL`. Readings land
-in `sensors.victron`.
+`VICTRON_SCAN_DURATION` short relative to `VICTRON_SCAN_INTERVAL`. Adding
+devices to an existing scan is free: the scan already runs and filters by
+address, so a second or third device costs no extra radio time.
 
 Because there is no connection to lose, the only sign that a Victron device has
 gone quiet is the absence of readings; `victron_missed` counts scans that
 produced nothing for a configured device and is the metric worth alerting on.
+It means "this device is not transmitting readable state" and nothing else — a
+record type with no parser, or a payload that fails to decrypt, does not
+increment it, because in both cases the device is plainly alive and pointing at
+a radio problem would waste the reader's time.
+
+A newly installed SmartShunt reports `state_of_charge`, `consumed_ah`, and
+`time_to_go_minutes` as NULL until it has seen a full charge or been
+synchronised by hand in VictronConnect. That is the device declining to guess
+rather than a fault, and it is why those columns are nullable: storing the
+unavailable sentinel as `0` would read as a flat battery.
 
 ### WiFi and Bluetooth on a Raspberry Pi
 
@@ -171,10 +199,21 @@ question is usually whether one of them has quietly died:
 
 Battery readings land in `sensors.litime`, a hypertable keyed on `time` with a
 `battery_id` column identifying the source. Rows written before multi-battery
-support are backfilled as `unknown`. Victron readings land in `sensors.victron`,
-keyed on `time` with a `device_id`.
+support are backfilled as `unknown`.
 
-Both are defined in
+Victron readings are split by record type, both keyed on `time` with a
+`device_id`: solar chargers to `sensors.victron`, battery monitors to
+`sensors.victron_battery_monitor`. They are separate tables because the two
+record types share only `battery_voltage` — everything else one reports, the
+other does not.
+
+On the battery monitor table, `aux_value` is stored beside `aux_input_type`
+because the shunt's auxiliary input can be a starter battery, a series-string
+midpoint, or a temperature sensor. The unit changes with it — volts in two
+cases, degrees celsius in the third — so the number is uninterpretable without
+the type.
+
+All are defined in
 [lfprocks/timescale-migrations](https://github.com/lfprocks/timescale-migrations),
 which is the single source of truth for the `sensors` schema and what migrates
 the live database. This repository does **not** carry its own copy — two files

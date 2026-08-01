@@ -128,6 +128,67 @@ func (c *TimescaleClient) InsertVictron(ctx context.Context, measure VictronMeas
 	return nil
 }
 
+//go:embed queries/insert_victron_battery_monitor.pgsql
+var insertVictronBatteryMonitor string
+
+// VictronBatteryMonitorMeasurement is one decoded Victron battery monitor
+// advertisement -- a BMV-7xx or a SmartShunt.
+//
+// It goes to its own table rather than sharing sensors.victron: of everything a
+// battery monitor reports, only BatteryVoltage means the same thing as it does
+// for a solar charger.
+//
+// As with VictronMeasurement the readings are pointers, and the distinction
+// matters more here. A shunt that has not been synchronised reports no state of
+// charge at all until it has seen a full charge; storing that as 0 would read
+// as a flat battery rather than as an unknown one.
+type VictronBatteryMonitorMeasurement struct {
+	DeviceID   string
+	ObservedAt time.Time
+	ModelID    uint16
+	ModelName  string
+	RecordType uint8
+
+	BatteryVoltage *float64
+	// BatteryCurrent is positive into the battery, negative out of it.
+	BatteryCurrent  *float64
+	StateOfCharge   *float64
+	ConsumedAh      *float64
+	TimeToGoMinutes *int32
+	// AlarmReason is nil when no alarm is active, rather than a string saying
+	// so, so that "is anything wrong" is a NULL check rather than a comparison
+	// against a magic value.
+	AlarmReason *string
+	// AuxInputType is always recorded, including when nothing is wired to the
+	// aux input, because it is what makes AuxValue interpretable at all.
+	AuxInputType string
+	AuxValue     *float64
+}
+
+// InsertVictronBatteryMonitor records one battery monitor reading.
+func (c *TimescaleClient) InsertVictronBatteryMonitor(ctx context.Context, measure VictronBatteryMonitorMeasurement) error {
+	_, err := c.Pool.Exec(ctx, insertVictronBatteryMonitor,
+		measure.ObservedAt,
+		measure.DeviceID,
+		int32(measure.ModelID),
+		measure.ModelName,
+		int16(measure.RecordType),
+		measure.BatteryVoltage,
+		measure.BatteryCurrent,
+		measure.StateOfCharge,
+		measure.ConsumedAh,
+		measure.TimeToGoMinutes,
+		measure.AlarmReason,
+		measure.AuxInputType,
+		measure.AuxValue,
+	)
+	if err != nil {
+		return fmt.Errorf("insert victron battery monitor data: %w", err)
+	}
+
+	return nil
+}
+
 func mapCellVoltages(cellVoltages []float32) map[string]float32 {
 	voltages := make(map[string]float32, len(cellVoltages))
 	for i, voltage := range cellVoltages {
